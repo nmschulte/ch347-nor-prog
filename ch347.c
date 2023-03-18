@@ -30,7 +30,7 @@ int ch347_spi_write_packet(struct ch347_priv *priv, uint8_t cmd, const void *tx,
     if (len < cur_len)
         cur_len = len;
     memcpy(priv->tmpbuf + 3, tx, cur_len);
-    err = libusb_bulk_transfer(priv->handle, CH347_EPOUT, priv->tmpbuf, cur_len + 3, &transferred, 1000);
+    err = libusb_bulk_transfer(priv->handle, CH347_VCP_CH347_EPOUT, priv->tmpbuf, cur_len + 3, &transferred, 1000);
     if (err) {
         fprintf(stderr, "ch347: libusb: failed to send packet: %d\n", err);
         return err;
@@ -38,7 +38,7 @@ int ch347_spi_write_packet(struct ch347_priv *priv, uint8_t cmd, const void *tx,
     if (cur_len < len) {
         /* This discards the const qualifier. However, libusb won't be writing to it. */
         ptr = (uint8_t *) (tx + cur_len);
-        err = libusb_bulk_transfer(priv->handle, CH347_EPOUT, ptr, len - cur_len, &transferred, 1000);
+        err = libusb_bulk_transfer(priv->handle, CH347_VCP_CH347_EPOUT, ptr, len - cur_len, &transferred, 1000);
         if (err) {
             fprintf(stderr, "ch347: libusb: failed to send packet: %d\n", err);
             return err;
@@ -51,7 +51,7 @@ int ch347_spi_read_packet(struct ch347_priv *priv, uint8_t cmd, void *rx, int le
     int cur_len, rxlen, rx_received;
     int err, transferred;
 
-    err = libusb_bulk_transfer(priv->handle, CH347_EPIN, priv->tmpbuf, sizeof(priv->tmpbuf), &transferred, 1000);
+    err = libusb_bulk_transfer(priv->handle, CH347_VCP_CH347_EPIN, priv->tmpbuf, sizeof(priv->tmpbuf), &transferred, 1000);
     if (err) {
         fprintf(stderr, "ch347: libusb: failed to receive packet: %d\n", err);
         return err;
@@ -75,7 +75,7 @@ int ch347_spi_read_packet(struct ch347_priv *priv, uint8_t cmd, void *rx, int le
     rx_received = cur_len;
     while (rx_received < rxlen) {
         /* The leftover data length is known so we don't need to deal with packet overflow using tmpbuf. */
-        err = libusb_bulk_transfer(priv->handle, CH347_EPIN, rx + rx_received, rxlen - rx_received, &transferred, 1000);
+        err = libusb_bulk_transfer(priv->handle, CH347_VCP_CH347_EPIN, rx + rx_received, rxlen - rx_received, &transferred, 1000);
         if (err) {
             fprintf(stderr, "ch347: libusb: failed to receive packet: %d\n", err);
             return err;
@@ -255,7 +255,7 @@ struct ch347_priv *ch347_open() {
     }
 
     libusb_set_option(priv->ctx, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_DEBUG);
-    priv->handle = libusb_open_device_with_vid_pid(priv->ctx, CH347_SPI_VID, CH347_SPI_PID);
+    priv->handle = libusb_open_device_with_vid_pid(priv->ctx, CH347_VID, CH347_VCP_PID);
     if (!priv->handle) {
         perror("ch347: libusb: open");
         goto ERR_1;
@@ -263,7 +263,7 @@ struct ch347_priv *ch347_open() {
 
     libusb_set_auto_detach_kernel_driver(priv->handle, 1);
 
-    ret = libusb_claim_interface(priv->handle, CH347_SPI_IF);
+    ret = libusb_claim_interface(priv->handle, CH347_VCP_CH347_IF);
     if (ret < 0) {
         perror("ch347: libusb: claim_if");
         goto ERR_2;
@@ -275,7 +275,7 @@ struct ch347_priv *ch347_open() {
     return priv;
 
     ERR_3:
-    libusb_release_interface(priv->handle, CH347_SPI_IF);
+    libusb_release_interface(priv->handle, CH347_VCP_CH347_IF);
     ERR_2:
     libusb_close(priv->handle);
     ERR_1:
@@ -286,7 +286,7 @@ struct ch347_priv *ch347_open() {
 }
 
 void ch347_close(struct ch347_priv *priv) {
-    libusb_release_interface(priv->handle, CH347_SPI_IF);
+    libusb_release_interface(priv->handle, CH347_VCP_CH347_IF);
     libusb_close(priv->handle);
     libusb_exit(priv->ctx);
     free(priv);
