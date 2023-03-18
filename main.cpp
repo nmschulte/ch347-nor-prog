@@ -1,461 +1,280 @@
-#include "stdafx.h"
-
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <errno.h>
 #include <string.h>
 
 #include "spi-op.h"
-#include "spi_flash.h"
+#include "spi_tle920x.h"
+
+#define PRINTF_BYTE_BINARY_FORMAT "%c%c%c%c%c%c%c%c"
+#define PRINTF_BYTE_BINARY(byte)  \
+  ((byte) & 0x80 ? '1' : '0'), \
+  ((byte) & 0x40 ? '1' : '0'), \
+  ((byte) & 0x20 ? '1' : '0'), \
+  ((byte) & 0x10 ? '1' : '0'), \
+  ((byte) & 0x08 ? '1' : '0'), \
+  ((byte) & 0x04 ? '1' : '0'), \
+  ((byte) & 0x02 ? '1' : '0'), \
+  ((byte) & 0x01 ? '1' : '0')
+
+#define PRINTF_NIBBLE_BINARY_FORMAT "%c%c%c%c"
+#define PRINTF_NIBBLE_BINARY(nibble)  \
+  ((nibble) & 0x08 ? '1' : '0'), \
+  ((nibble) & 0x04 ? '1' : '0'), \
+  ((nibble) & 0x02 ? '1' : '0'), \
+  ((nibble) & 0x01 ? '1' : '0')
 
 static void ShowUsage(void)
 {
-	puts(
-		"Usage:\n"
-		"  probe\n"
-		"  read <file> [<addr> [size]]\n"
-		"  erase [chip | <addr> <size>]\n"
-		"  write [erase] [verify] <file> [addr] [size]\n");
+    puts(
+            "Usage:\n"
+            "  diag\n"
+            "  reset\n"
+            "  rev\n"
+            "  ctrl [<oldis> <sin> <sen> <sdir> <spwm>]\n"
+    );
 }
 
-static int DoFlashRead(int argc, char *argv[])
+static void PrintDiag(unsigned char const diagnosis)
 {
-	unsigned int addr = 0, size;
-	const char *filename;
-	unsigned char *buff;
-	FILE *f;
+    printf("Outputs Enabled: %u\n", diagnosis & TLE920X_DIA_REG_EN_MASK != false);
+    printf("Overtemperature Shutdown: %u\n", diagnosis & TLE920X_DIA_REG_OT_MASK != false);
+    printf("Transmission Validation: %u\n", diagnosis & TLE920X_DIA_REG_TV_MASK != false);
+    printf("Overcurrent Limited: %u\n", diagnosis & TLE920X_DIA_REG_CL_MASK != false);
 
-	if (!FlashProbe())
-		return -ENODEV;
-
-	size = FlashGetSize();
-
-	if (!argc)
-	{
-		fprintf(stderr, "Error: please specify a filename.\n");
-		return -EINVAL;
-	}
-
-	filename = argv[0];
-
-	argc--;
-	argv++;
-
-	if (argc)
-	{
-		if (!isdigit(argv[0][0]))
-		{
-			fprintf(stderr, "Please input a numeric flash address!\n");
-			return -EINVAL;
-		}
-
-		addr = strtoul(argv[0], NULL, 0);
-
-		if (addr >= FlashGetSize())
-		{
-			fprintf(stderr, "Error: start address exceeds the flash size!\n");
-			return -EINVAL;
-		}
-
-		argc--;
-		argv++;
-
-		if (!argc)
-			size = FlashGetSize() - addr;
-	}
-
-	if (argc)
-	{
-		if (!isdigit(argv[0][0]))
-		{
-			fprintf(stderr, "Please input a numeric size!\n");
-			return -EINVAL;
-		}
-
-		size = strtoul(argv[0], NULL, 0);
-
-		if (addr + size > FlashGetSize())
-		{
-			fprintf(stderr, "Error: end address exceeds the flash size!\n");
-			return -EINVAL;
-		}
-	}
-
-	buff = new unsigned char[size];
-	if (!buff)
-	{
-		fprintf(stderr, "Error: unable to allocate memory!\n");
-		return -ENOMEM;
-	}
-
-	printf("Reading flash from %xh, size %xh ...\n", addr, size);
-
-	if (!FlashRead(addr, size, buff))
-	{
-		printf("Operation failed.\n");
-		delete[] buff;
-		return -EFAULT;
-	}
-
-	printf("Saving to file %s ...\n", filename);
-
-	f = fopen(filename, "wb");
-	if (!f)
-	{
-		fprintf(stderr, "Error: unable to open/create file! error %d\n", errno);
-		delete[] buff;
-		return -errno;
-	}
-
-	if (fwrite(buff, 1, size, f) != size)
-	{
-		fprintf(stderr, "Error: failed to write to file! error %d\n", errno);
-		delete[] buff;
-		return -errno;
-	}
-
-	fclose(f);
-
-	printf("Done.\n");
-
-	return 0;
+    printf("Diagnosis: ");
+    unsigned char dia = diagnosis & TLE920X_DIA_REG_DIA_MASK;
+    switch (dia)
+    {
+        case TLE920X_DIA_REG_NO_FAILURE:
+            printf("No Failure");
+            break;
+        case TLE920X_DIA_REG_SCG1:
+            printf("OUT1 Short To Ground");
+            break;
+        case TLE920X_DIA_REG_SCB1:
+            printf("OUT1 Short To Battery");
+            break;
+        case TLE920X_DIA_REG_OL:
+            printf("Open Load");
+            break;
+        case TLE920X_DIA_REG_SCG2:
+            printf("OUT2 Short To Ground");
+            break;
+        case TLE920X_DIA_REG_SCG1_SCG2:
+            printf("OUT1 Short To Ground");
+            printf("\n           ");
+            printf("OUT2 Short To Ground");
+            break;
+        case TLE920X_DIA_REG_SCB1_SCG2:
+            printf("OUT1 Short To Battery");
+            printf("\n           ");
+            printf("OUT2 Short To Ground");
+            break;
+        case TLE920X_DIA_REG_SCB2:
+            printf("OUT2 Short To Battery");
+            break;
+        case TLE920X_DIA_REG_SCG1_SCB2:
+            printf("OUT1 Short To Ground");
+            printf("\n           ");
+            printf("OUT2 Short To Battery");
+            break;
+        case TLE920X_DIA_REG_SCB1_SCB2:
+            printf("OUT1 Short To Battery");
+            printf("\n           ");
+            printf("OUT2 Short To Battery");
+            break;
+        case TLE920X_DIA_REG_VSUV:
+            printf("VS Undervoltage");
+            break;
+        default:
+            printf("Undefined! (" PRINTF_NIBBLE_BINARY_FORMAT ")", PRINTF_NIBBLE_BINARY(dia));
+    }
+    printf("\n");
 }
 
-static int DoFlashChipErase(int argc, char *argv[])
+static void PrintControl(unsigned char const control)
 {
-	if (!FlashProbe())
-		return -ENODEV;
-
-	printf("Erasing entire flash, please wait ...\n");
-
-	if (!FlashChipErase())
-	{
-		printf("Operation failed.\n");
-		return -EFAULT;
-	}
-
-	printf("Done.\n");
-
-	return 0;
+    printf("Open Load Disconnect: %u\n", control & TLE920X_CTRL_REG_OLDIS_MASK != false);
+    printf("SPI Control: %u\n", control & TLE920X_CTRL_REG_SIN_MASK != false);
+    printf("SPI Control: !DIS: %u\n", control & TLE920X_CTRL_REG_SEN_MASK != false);
+    printf("SPI Control: DIR: %u\n", control & TLE920X_CTRL_REG_SDIR_MASK != false);
+    printf("SPI Control: PWM: %u\n", control & TLE920X_CTRL_REG_SPWM_MASK != false);
 }
 
-static int DoFlashErase(int argc, char *argv[])
+static int DoDiag()
 {
-	unsigned int addr = 0, size;
+    unsigned char diagnosis;
+    if (!ReadDiagnosis(diagnosis))
+    {
+        printf("Operation failed.\n");
+        return -EFAULT;
+    }
 
-	if (!FlashProbe())
-		return -ENODEV;
+    PrintDiag(diagnosis);
 
-	size = FlashGetSize();
-
-	if (!isdigit(argv[0][0]))
-	{
-		fprintf(stderr, "Please input a numeric flash address!\n");
-		return -EINVAL;
-	}
-
-	addr = strtoul(argv[0], NULL, 0);
-
-	if (addr >= FlashGetSize())
-	{
-		fprintf(stderr, "Error: start address exceeds the flash size!\n");
-		return -EINVAL;
-	}
-
-	if (!isdigit(argv[1][0]))
-	{
-		fprintf(stderr, "Please input a numeric size!\n");
-		return -EINVAL;
-	}
-
-	size = strtoul(argv[1], NULL, 0);
-
-	if (addr + size > FlashGetSize())
-	{
-		fprintf(stderr, "Error: end address exceeds the flash size!\n");
-		return -EINVAL;
-	}
-
-	printf("Erasing flash from %xh, size %xh ...\n", addr, size);
-
-	if (!FlashErase(addr, size))
-	{
-		printf("Operation failed.\n");
-		return -EFAULT;
-	}
-
-	printf("Done.\n");
-
-	return 0;
+    return 0;
 }
 
-static int DoFlashWrite(int argc, char *argv[])
+static int DoReset()
 {
-	int need_erase = 0, need_verify = 0, size_set = 0, pass = 1;
-	unsigned int addr = 0, size, filelen, i;
-	const char *filename;
-	unsigned char *buff, *buff_check;
-	FILE *f;
+    unsigned char diagnosis;
+    if (!ResetDiagnosis(diagnosis))
+    {
+        printf("Operation failed.\n");
+        return -EFAULT;
+    }
 
-	if (!FlashProbe())
-		return -ENODEV;
+    PrintDiag(diagnosis);
 
-	size = FlashGetSize();
-
-	if (!argc)
-	{
-_insufficinet_param:
-		fprintf(stderr, "Error: please specify a filename.\n");
-		return -EINVAL;
-	}
-
-	if (!strcmp(argv[0], "erase"))
-	{
-		need_erase = 1;
-		argc--;
-		argv++;
-	}
-
-	if (!argc)
-		goto _insufficinet_param;
-
-	if (!strcmp(argv[0], "verify"))
-	{
-		need_verify = 1;
-		argc--;
-		argv++;
-	}
-
-	if (!argc)
-		goto _insufficinet_param;
-
-	filename = argv[0];
-
-	argc--;
-	argv++;
-
-	if (argc)
-	{
-		if (!isdigit(argv[0][0]))
-		{
-			fprintf(stderr, "Please input a numeric flash address!\n");
-			return -EINVAL;
-		}
-
-		addr = strtoul(argv[0], NULL, 0);
-
-		if (addr >= FlashGetSize())
-		{
-			fprintf(stderr, "Error: start address exceeds the flash size!\n");
-			return -EINVAL;
-		}
-
-		argc--;
-		argv++;
-
-		if (!argc)
-			size = FlashGetSize() - addr;
-	}
-
-	if (argc)
-	{
-		if (!isdigit(argv[0][0]))
-		{
-			fprintf(stderr, "Please input a numeric size!\n");
-			return -EINVAL;
-		}
-
-		size = strtoul(argv[0], NULL, 0);
-
-		if (addr + size > FlashGetSize())
-		{
-			fprintf(stderr, "Error: end address exceeds the flash size!\n");
-			return -EINVAL;
-		}
-
-		size_set = 1;
-	}
-
-	printf("Reading file %s ...\n", filename);
-
-	f = fopen(filename, "rb");
-	if (!f)
-	{
-		fprintf(stderr, "Error: unable to open file! error %d\n", errno);
-		return -errno;
-	}
-
-	fseek(f, 0, SEEK_END);
-	filelen = ftell(f);
-
-	fseek(f, 0, SEEK_SET);
-
-	if (filelen > size)
-	{
-		fprintf(stderr, "Warning: file size is larger than write size.\n");
-	}
-	else if (filelen < size)
-	{
-		if (size_set)
-			fprintf(stderr, "Warning: write size is larger than file size, write size truncated to 0x%x.\n", filelen);
-		size = filelen;
-	}
-
-	buff = new unsigned char[size];
-	if (!buff)
-	{
-		fprintf(stderr, "Error: unable to allocate memory!\n");
-		return -ENOMEM;
-	}
-
-	if (fread(buff, 1, size, f) != size)
-	{
-		fprintf(stderr, "Error: failed to read file! error %d\n", errno);
-		delete[] buff;
-		return -errno;
-	}
-
-	fclose(f);
-
-	printf("Done.\n\n");
-
-	if (need_erase)
-	{
-		printf("Erasing flash from %xh, size %xh ...\n", addr, size);
-
-		if (!FlashErase(addr, size))
-		{
-			printf("Operation aborted.\n");
-			delete[] buff;
-			return -EFAULT;
-		}
-
-		printf("Done.\n\n");
-	}
-
-	printf("Writing flash at %xh, size %xh ...\n", addr, size);
-
-	if (!FlashWrite(addr, buff, size))
-	{
-		printf("Operation aborted.\n");
-		delete[] buff;
-		return -EFAULT;
-	}
-
-	printf("Done.\n");
-
-	if (need_verify)
-	{
-		printf("\n");
-
-		buff_check = new unsigned char[size];
-		if (!buff_check)
-		{
-			fprintf(stderr, "Error: unable to allocate memory!\n");
-			return -ENOMEM;
-		}
-
-		printf("Reading flash from %xh, size %xh ...\n", addr, size);
-
-		if (!FlashRead(addr, size, buff_check))
-		{
-			printf("Operation failed.\n");
-			delete[] buff;
-			delete[] buff_check;
-			return -EFAULT;
-		}
-
-		printf("Done.\n\n");
-
-		printf("Verifying ...\n");
-
-		for (i = 0; i < size; i++)
-		{
-			if (buff[i] != buff_check[i])
-			{
-				printf("Difference at 0x%08x, read 0x%02x, expected 0x%02x\n", addr + i, buff_check[i], buff[i]);
-				pass = 0;
-			}
-		}
-
-		if (pass)
-			printf("Passed.\n");
-	}
-
-	return 0;
+    return 0;
 }
 
-int main(int argc, char *argv[])
+static int DoRev()
 {
-	int argv_c = argc - 1, argv_p = 1;
-	int ret = 0;
+    unsigned char revision;
+    if (!ReadRevision(revision))
+    {
+        printf("Operation failed.\n");
+        return -EFAULT;
+    }
 
-	printf("Simple CH347 SPI Flash Programmer\nBased on ch341prog by HackPascal <hackpascal@gmail.com>\n\n");
+    unsigned char fixed = revision & TLE920X_REV_REG_FIXED_MASK;
+    if (fixed != TLE920X_REV_REG_FIXED)
+        printf("Fixed Revision Mismatch! (" PRINTF_NIBBLE_BINARY_FORMAT " != " PRINTF_NIBBLE_BINARY_FORMAT ")\n",
+                PRINTF_NIBBLE_BINARY(fixed), PRINTF_NIBBLE_BINARY(TLE920X_REV_REG_FIXED));
 
-	SPIDeviceInit(500);
+    printf("Revision: %01x.\n", revision & TLE920X_REV_REG_REV_MASK);
 
-	if (argc == 1)
-	{
-	_show_usage:
-		ShowUsage();
-		goto cleanup;
-	}
+    return 0;
+}
 
-	if (!strcmp(argv[argv_p], "probe"))
-	{
-		FlashProbe();
-		goto cleanup;
-	}
+static int DoCtrlRead()
+{
+    unsigned char control;
+    if (!ReadControl(control))
+    {
+        printf("Operation failed.\n");
+        return -EFAULT;
+    }
 
-	if (!strcmp(argv[argv_p], "read"))
-	{
-		argv_c--;
-		argv_p++;
+    PrintControl(control);
 
-		if (argv_c < 1)
-			goto _show_usage;
+    return 0;
+}
 
-		ret = DoFlashRead(argv_c, argv + argv_p);
-		goto cleanup;
-	}
+static int DoCtrlWrite(int argc, char * const argv[])
+{
+    unsigned char control;
 
-	if (!strcmp(argv[argv_p], "erase"))
-	{
-		argv_c--;
-		argv_p++;
+    if (!isdigit(argv[0][0]))
+    {
+        fprintf(stderr, "Please input a 0 or 1 Open Load Disconnect value!\n");
+        return -EINVAL;
+    }
+    if (!isdigit(argv[1][0]))
+    {
+        fprintf(stderr, "Please input a 0 or 1 SPI Control value!\n");
+        return -EINVAL;
+    }
+    if (!isdigit(argv[2][0]))
+    {
+        fprintf(stderr, "Please input a 0 or 1 SPI Control: !DIS value!\n");
+        return -EINVAL;
+    }
+    if (!isdigit(argv[3][0]))
+    {
+        fprintf(stderr, "Please input a 0 or 1 SPI Control: DIR value!\n");
+        return -EINVAL;
+    }
+    if (!isdigit(argv[4][0]))
+    {
+        fprintf(stderr, "Please input a 0 or 1 SPI Control: PWM value!\n");
+        return -EINVAL;
+    }
 
-		if (argv_c < 1)
-			goto _show_usage;
+    control = ((argv[0][0] == '1') << 4) |
+        ((argv[1][0] == '1') << 3) |
+        ((argv[2][0] == '1') << 2) |
+        ((argv[3][0] == '1') << 1) |
+        ((argv[4][0] == '1') << 0);
 
-		if (!strcmp(argv[argv_p], "chip"))
-		{
-			ret = DoFlashChipErase(argv_c, argv + argv_p);
-			goto cleanup;
-		}
+    if (!WriteControl(control))
+    {
+        printf("Operation failed.\n");
+        return -EFAULT;
+    }
 
-		if (argv_c < 2)
-			goto _show_usage;
+    PrintControl(control);
 
-		ret = DoFlashErase(argv_c, argv + argv_p);
-		goto cleanup;
-	}
+    return 0;
+}
 
-	if (!strcmp(argv[argv_p], "write"))
-	{
-		argv_c--;
-		argv_p++;
+int main(int const argc, char * const argv[])
+{
+    int argv_c = argc - 1, argv_p = 1;
+    int ret = 0;
 
-		if (argv_c < 1)
-			goto _show_usage;
+    printf("Simple CH347 SPI TLE920x Diagnosis Commander\n"
+           "Forked from ch347-nor-prog by Chuanhong Guo <gch981213@gmail.com>\n"
+           "Based on ch341prog by HackPascal <hackpascal@gmail.com>\n\n");
 
-		ret = DoFlashWrite(argv_c, argv + argv_p);
-		goto cleanup;
-	}
+    int clk_khz = 500;
+    if (!SPIDeviceInit(&clk_khz)) {
+        printf("SPI Initialization Error!\n");
+        goto cleanup;
+    }
 
-	goto _show_usage;
+    printf("SPI Frequency: %u kHz\n\n", clk_khz);
+
+    if (argc == 1)
+    {
+_show_usage:
+        ShowUsage();
+        goto cleanup;
+    }
+
+    if (!strcmp(argv[argv_p], "diag"))
+    {
+        ret = DoDiag();
+        goto cleanup;
+    }
+
+    if (!strcmp(argv[argv_p], "reset"))
+    {
+        ret = DoReset();
+        goto cleanup;
+    }
+
+    if (!strcmp(argv[argv_p], "rev"))
+    {
+        ret = DoRev();
+        goto cleanup;
+    }
+
+    if (!strcmp(argv[argv_p], "ctrl"))
+    {
+        argv_c--;
+        argv_p++;
+
+        if (argv_c < 1)
+        {
+            ret = DoCtrlRead();
+            goto cleanup;
+        }
+
+        if (argv_c < 5)
+            goto _show_usage;
+
+        ret = DoCtrlWrite(argv_c, argv + argv_p);
+        goto cleanup;
+    }
+
+    goto _show_usage;
 
 cleanup:
-	SPIDeviceRelease();
+    SPIDeviceRelease();
 
     return ret;
 }
