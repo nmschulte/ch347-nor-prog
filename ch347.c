@@ -131,16 +131,20 @@ int ch347_set_cs(struct ch347_priv *priv, int cs, int val) {
 
 int ch347_set_spi_freq(struct ch347_priv *priv, int *clk_khz) {
     int freq = CH347_SPI_MAX_FREQ;
-    int prescaler;
-    for (prescaler = 0; prescaler < CH347_SPI_MAX_PRESCALER; prescaler++) {
-        if (freq <= *clk_khz)
-            break;
+    int prescale = 0;
+
+    while (prescale < CH347_SPI_MAX_PRESCALER && freq > *clk_khz) {
         freq /= 2;
+        ++prescale;
     }
+
     if (freq > *clk_khz)
         return -EINVAL;
-    priv->cfg.SPI_BaudRatePrescaler = prescaler * 8;
+
     *clk_khz = freq;
+
+    priv->cfg.SPI_BaudRatePrescaler = prescale * 8;
+
     return ch347_commit_settings(priv);
 }
 
@@ -151,6 +155,7 @@ int ch347_setup_spi(struct ch347_priv *priv, int spi_mode, bool lsb_first, bool 
     priv->cfg.SPI_CPOL = (spi_mode & 2) ? SPI_CPOL_High : SPI_CPOL_Low;
     priv->cfg.SPI_CPHA = (spi_mode & 1) ? SPI_CPHA_2Edge : SPI_CPHA_1Edge;
     priv->cfg.SPI_NSS = SPI_NSS_Software;
+    priv->cfg.SPI_BaudRatePrescaler = 0;
     priv->cfg.SPI_FirstBit = lsb_first ? SPI_FirstBit_LSB : SPI_FirstBit_MSB;
     priv->cfg.SPI_WriteReadInterval = 0;
     priv->cfg.SPI_OutDefaultData = 0;
