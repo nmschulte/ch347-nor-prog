@@ -9,7 +9,7 @@
 
 struct ch347_priv *priv;
 
-bool SPIDeviceInit() {
+bool SPIDeviceInit(int *clk_khz) {
     int ret;
     priv = ch347_open();
     if (!priv)
@@ -17,8 +17,8 @@ bool SPIDeviceInit() {
     ret = ch347_setup_spi(priv, 3, false, false, false);
     if (ret)
         return false;
-    int freq = 60000;
-    ret = ch347_set_spi_freq(priv, &freq);
+    int freq = 6000;
+    ret = ch347_set_spi_freq(priv, clk_khz ? clk_khz : &freq);
     return ret == 0;
 }
 

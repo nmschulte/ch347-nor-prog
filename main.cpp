@@ -1,4 +1,3 @@
-
 #include "stdafx.h"
 
 #include <ctype.h>
@@ -393,7 +392,7 @@ int main(int argc, char *argv[])
 
 	printf("Simple CH347 SPI Flash Programmer\nBased on ch341prog by HackPascal <hackpascal@gmail.com>\n\n");
 
-	SPIDeviceInit();
+	SPIDeviceInit(500);
 
 	if (argc == 1)
 	{
