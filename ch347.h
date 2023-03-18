@@ -50,8 +50,11 @@ extern "C" {
 #define CH347_JTAG_CH347_EPOUT (6 | LIBUSB_ENDPOINT_OUT)
 #define CH347_JTAG_CH347_EPIN (6 | LIBUSB_ENDPOINT_IN)
 
+// Maximum 60 MHz SPI frequency
 #define CH347_SPI_MAX_FREQ 60000
+// Maximum x8 SPI frequency prescale (0: 60 MHz)
 #define CH347_SPI_MAX_PRESCALER 7
+// Maximum 4 MB transmission
 #define CH347_SPI_MAX_TRX 4096
 
 /* SPI_data_direction */
