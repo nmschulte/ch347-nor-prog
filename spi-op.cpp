@@ -64,3 +64,11 @@ bool SPIWriteThenRead(const unsigned char *in, unsigned int in_size, unsigned ch
     ch347_set_cs(priv, 0, 1);
     return ret == 0;
 }
+
+bool SPIRead(unsigned char *data, unsigned int size) {
+    int ret;
+    ch347_set_cs(priv, 0, 0);
+    ret = ch347_spi_rx(priv, data, size);
+    ch347_set_cs(priv, 0, 1);
+    return ret == 0;
+}
