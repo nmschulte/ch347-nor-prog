@@ -14,7 +14,7 @@ bool SPIDeviceInit(int *clk_khz) {
     priv = ch347_open();
     if (!priv)
         exit(-1);
-    ret = ch347_setup_spi(priv, 3, false, false, false);
+    ret = ch347_setup_spi(priv, 1, false, false, false);
     if (ret)
         return false;
     int freq = 6000;
